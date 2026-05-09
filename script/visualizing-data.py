@@ -1,113 +1,183 @@
 import os
+import sys
 import json
 import cv2
 import numpy as np
+import tensorflow as tf
 import mediapipe as mp
 import matplotlib.pyplot as plt
-from tensorflow.keras.models import load_model
+from collections import deque
 
-# -------------------------------------------------
-# Absolute paths (NON-NEGOTIABLE)
-# -------------------------------------------------
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from config import (
+    MODEL_TFLITE, LABELS_PATH,
+    MAX_SEQ_LEN, MIN_SEQ_LEN, N_FEATURES,
+    CONFIDENCE_THRESHOLD,
+)
 
-MODEL_PATH = os.path.join(BASE_DIR, "..", "Models", "trained_model.h5")
-LABELS_PATH = os.path.join(BASE_DIR, "..", "Models", "labels.json")
+# ── Load TFLite model ─────────────────────────────────────────────────────────
+if not os.path.exists(MODEL_TFLITE):
+    raise FileNotFoundError(
+        f"TFLite model not found: {MODEL_TFLITE}\n"
+        "Run training-data.py first to generate it."
+    )
 
-# -------------------------------------------------
-# Config
-# -------------------------------------------------
-MAX_SEQ_LEN = 100
-CONFIDENCE_THRESHOLD = 0.5
+interpreter = tf.lite.Interpreter(model_path=MODEL_TFLITE)
+interpreter.allocate_tensors()
+input_details  = interpreter.get_input_details()
+output_details = interpreter.get_output_details()
 
+# ── Load labels ───────────────────────────────────────────────────────────────
+if not os.path.exists(LABELS_PATH):
+    raise FileNotFoundError(f"Labels not found: {LABELS_PATH}")
 
-# --- Load model ---
-if not os.path.exists(MODEL_PATH):
-    raise FileNotFoundError(f"Model not found at {MODEL_PATH}")
-model = load_model(MODEL_PATH)
-
-# --- Load labels ---
 with open(LABELS_PATH, "r") as f:
     label_map = json.load(f)
-labels = [label for label, _ in sorted(label_map.items(), key=lambda x: x[1])]
 
-# --- MediaPipe ---
-mp_hands = mp.solutions.hands
+labels       = [k for k, _ in sorted(label_map.items(), key=lambda x: x[1])]
+NEUTRAL_LABEL = "neutral"
+
+# ── MediaPipe ─────────────────────────────────────────────────────────────────
+mp_hands   = mp.solutions.hands
 mp_drawing = mp.solutions.drawing_utils
 
-# --- Normalize function ---
-def normalize_landmarks(landmarks):
-    landmarks = np.array(landmarks)
-    landmarks -= np.mean(landmarks, axis=0)
-    landmarks /= np.max(np.linalg.norm(landmarks, axis=1)) + 1e-6
-    return landmarks.flatten()
 
-def prepare_sequence(sequence, max_len=MAX_SEQ_LEN):
-    padded = sequence.copy()
-    while len(padded) < max_len:
-        padded.insert(0, padded[0])
-    padded = np.array(padded[-max_len:])
-    return padded.reshape(1, max_len, -1).astype(np.float32)
+# ── Utilities ─────────────────────────────────────────────────────────────────
+def normalize_landmarks(landmarks) -> np.ndarray:
+    lm = np.array(landmarks, dtype=np.float32)
+    lm -= lm.mean(axis=0)
+    lm /= (np.max(np.linalg.norm(lm, axis=1)) + 1e-6)
+    return lm.flatten()
 
-# --- Setup Matplotlib plot ---
+
+def prepare_sequence(seq: deque) -> np.ndarray:
+    """Pre-pad to MAX_SEQ_LEN — matches training and inference exactly."""
+    frames = list(seq)[-MAX_SEQ_LEN:]
+    pad_len = MAX_SEQ_LEN - len(frames)
+    if pad_len > 0:
+        frames = [frames[0]] * pad_len + frames
+    return np.array(frames, dtype=np.float32).reshape(1, MAX_SEQ_LEN, N_FEATURES)
+
+
+# ── Matplotlib setup ──────────────────────────────────────────────────────────
 plt.ion()
-fig, ax = plt.subplots(figsize=(10, 4))
-bars = ax.bar(labels, [0]*len(labels))
+fig, ax = plt.subplots(figsize=(max(8, len(labels)), 4))
+
+bar_colors = ["#4a9eff"] * len(labels)
+bars       = ax.bar(labels, [0.0] * len(labels), color=bar_colors)
+
 ax.set_ylim(0, 1)
 ax.set_ylabel("Confidence")
-ax.set_title("Live Gesture Prediction")
-fig.canvas.manager.set_window_title("📊 GhostPen - Prediction Visualizer")
+ax.set_title("GhostPen — Live Prediction Confidence")
+ax.axhline(y=CONFIDENCE_THRESHOLD, color="red", linestyle="--",
+           linewidth=1, label=f"threshold ({CONFIDENCE_THRESHOLD})")
+ax.legend(fontsize=8)
+plt.tight_layout()
 
-def update_plot(prediction):
+try:
+    fig.canvas.manager.set_window_title("GhostPen — Prediction Visualizer")
+except Exception:
+    pass  # not all backends support this
+
+
+def update_plot(prediction: np.ndarray, top_label: str | None):
+    """Update bar heights and highlight the top prediction."""
+    top_idx = int(np.argmax(prediction))
     for i, bar in enumerate(bars):
-        bar.set_height(prediction[i])
+        bar.set_height(float(prediction[i]))
+        # Highlight top bar in green if above threshold, red otherwise
+        if i == top_idx:
+            above = prediction[i] >= CONFIDENCE_THRESHOLD
+            bar.set_color("#00c853" if above else "#ff5252")
+        else:
+            bar.set_color("#4a9eff")
     fig.canvas.draw()
     fig.canvas.flush_events()
 
-# --- Live Prediction ---
+
+# ── Main ──────────────────────────────────────────────────────────────────────
 def main():
     cap = cv2.VideoCapture(0)
-    sequence = []
+    if not cap.isOpened():
+        print("[ERROR] Could not open camera.")
+        return
 
-    with mp_hands.Hands(static_image_mode=False, max_num_hands=1, min_detection_confidence=0.7) as hands:
+    sequence = deque(maxlen=MAX_SEQ_LEN)
+    prediction = np.zeros(len(labels), dtype=np.float32)
+
+    print("[INFO] Visualizer running. Press 'q' in the camera window to quit.")
+
+    with mp_hands.Hands(
+        static_image_mode=False,
+        max_num_hands=1,
+        min_detection_confidence=0.7,
+        min_tracking_confidence=0.7,
+    ) as hands:
+
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
                 break
 
-            frame = cv2.flip(frame, 1)
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            frame  = cv2.flip(frame, 1)
+            rgb    = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             result = hands.process(rgb)
 
             label = None
-            conf = 0.0
-            prediction = np.zeros(len(labels))
+            conf  = 0.0
 
             if result.multi_hand_landmarks:
-                hand_landmarks = result.multi_hand_landmarks[0]
-                coords = [(lm.x, lm.y, lm.z) for lm in hand_landmarks.landmark]
-                coords = normalize_landmarks(coords)
+                hand_lm = result.multi_hand_landmarks[0]
+                coords  = [(lm.x, lm.y, lm.z) for lm in hand_lm.landmark]
+                coords  = normalize_landmarks(coords)
                 sequence.append(coords)
 
-                if len(sequence) > MAX_SEQ_LEN:
-                    sequence.pop(0)
+                if len(sequence) >= MIN_SEQ_LEN:
+                    inp = prepare_sequence(sequence)
+                    interpreter.set_tensor(input_details[0]["index"], inp)
+                    interpreter.invoke()
+                    prediction = interpreter.get_tensor(output_details[0]["index"])[0]
 
-                if len(sequence) >= 10:
-                    input_tensor = prepare_sequence(sequence)
-                    prediction = model.predict(input_tensor, verbose=0)[0]
-                    conf = np.max(prediction)
-                    label = labels[np.argmax(prediction)]
+                    conf  = float(np.max(prediction))
+                    label = labels[int(np.argmax(prediction))]
 
-                mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
+                mp_drawing.draw_landmarks(
+                    frame, hand_lm, mp_hands.HAND_CONNECTIONS
+                )
+            else:
+                # FIX: reset on hand lost — prevents stale context
+                sequence.clear()
+                prediction = np.zeros(len(labels), dtype=np.float32)
 
-            update_plot(prediction)
+            # Update chart
+            update_plot(prediction, label)
 
-            # Show top label
-            if conf >= CONFIDENCE_THRESHOLD:
-                cv2.putText(frame, f"{label} ({conf:.2f})", (10, 40),
-                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+            # ── Camera feed overlay ───────────────────────────────────────────
+            if label and label != NEUTRAL_LABEL and conf >= CONFIDENCE_THRESHOLD:
+                cv2.putText(
+                    frame, f"{label}  {conf:.2f}",
+                    (10, 46), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 2
+                )
+            elif label == NEUTRAL_LABEL:
+                cv2.putText(
+                    frame, "neutral",
+                    (10, 46), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (150, 150, 150), 1
+                )
 
-            cv2.imshow("GhostPen - Live Feed", frame)
+            # Show top-2 predictions as text for debugging
+            if len(prediction) > 0 and prediction.sum() > 0:
+                top2_idx = np.argsort(prediction)[-2:][::-1]
+                debug_text = "  ".join(
+                    f"{labels[i]}:{prediction[i]:.2f}" for i in top2_idx
+                )
+                cv2.putText(
+                    frame, debug_text,
+                    (10, frame.shape[0] - 12),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1
+                )
+
+            cv2.imshow("GhostPen — Live Feed", frame)
+
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
 
@@ -115,6 +185,8 @@ def main():
     cv2.destroyAllWindows()
     plt.ioff()
     plt.close()
+    print("[INFO] Visualizer stopped.")
+
 
 if __name__ == "__main__":
     main()
