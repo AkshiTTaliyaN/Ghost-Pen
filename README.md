@@ -9,7 +9,7 @@
 
 ---
 
-## ✍️ What It Does
+## What It Does
 
 GhostPen tracks your index fingertip in real time via webcam and recognises letters and symbols you draw in the air, powered by a custom-trained CNN:
 
@@ -24,7 +24,7 @@ Every stroke is captured, preprocessed, and classified in a single pipeline with
 
 ---
 
-## 🗂️ Project Structure
+## Project Structure
 
 ```
 ghostpen/
@@ -41,7 +41,7 @@ ghostpen/
 
 ---
 
-## 🧠 How It Works
+## How It Works
 
 ```
 Webcam Frame → MediaPipe Hand Tracking → Fingertip Coordinates
@@ -52,7 +52,7 @@ Each frame goes through the full pipeline. The model only classifies when a comp
 
 ---
 
-## 🧮 Model Performance
+## Model Performance
 
 | Metric | Value |
 |---|---|
@@ -64,7 +64,7 @@ Each frame goes through the full pipeline. The model only classifies when a comp
 
 ---
 
-## 🛡️ Design Decisions
+## Design Decisions
 
 - **Single responsibility** — tracking, capture, preprocessing, and inference are fully decoupled modules
 - **No external API calls** — fully offline, runs on local hardware only
@@ -74,7 +74,7 @@ Each frame goes through the full pipeline. The model only classifies when a comp
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 ```bash
 git clone https://github.com/AkshiTTaliyaN/Ghost-Pen
@@ -87,7 +87,7 @@ python main.py
 
 ---
 
-## 📍 Current Status
+## Current Status
 
 - [x] Real-time hand tracking via MediaPipe
 - [x] Custom CNN trained and deployed
@@ -99,7 +99,7 @@ python main.py
 
 ---
 
-## ⚠️ Usage Note
+## Usage Note
 
 GhostPen is a research and portfolio project.  
 Performance may vary based on lighting conditions, webcam quality, and background contrast.  
