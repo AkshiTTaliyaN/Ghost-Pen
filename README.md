@@ -15,10 +15,10 @@ GhostPen tracks your index fingertip in real time via webcam and recognises lett
 
 | Module | What It Does |
 |---|---|
-| 🖐️ **Hand Tracker** | MediaPipe detects 21 hand landmarks per frame at 30+ FPS |
-| 🎯 **Stroke Capture** | Fingertip coordinates are plotted onto a virtual canvas in real time |
-| 🧠 **CNN Classifier** | Custom-trained model predicts the drawn character with **90% accuracy** |
-| 🖥️ **Live Display** | OpenCV window renders the canvas, landmark overlay, and predicted label |
+| **Hand Tracker** | MediaPipe detects 21 hand landmarks per frame at 30+ FPS |
+| **Stroke Capture** | Fingertip coordinates are plotted onto a virtual canvas in real time |
+| **CNN Classifier** | Custom-trained model predicts the drawn character with **90% accuracy** |
+| **Live Display** | OpenCV window renders the canvas, landmark overlay, and predicted label |
 
 Every stroke is captured, preprocessed, and classified in a single pipeline with no perceptible lag.
 
