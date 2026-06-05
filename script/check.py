@@ -37,7 +37,6 @@ if os.path.exists(MODEL_TFLITE):
         input_details  = interpreter.get_input_details()
         output_details = interpreter.get_output_details()
 
-        # Verify input shape matches config
         expected_shape = [1, MAX_SEQ_LEN, N_FEATURES]
         actual_shape   = list(input_details[0]["shape"])
         if actual_shape != expected_shape:
@@ -134,11 +133,6 @@ if diagnostic["model_prediction_samples"]:
             f"pred={entry['predicted']:>8}  "
             f"conf={entry['confidence']:.3f}"
         )
-
-#if diagnostic["warnings"]:
- #   print("\n── Warnings ─────────────────────────────────────────────")
-  #  for w in diagnostic["warnings"]:
-   #     print(f"  ⚠  {w}")
 
 if diagnostic["errors"]:
     print("\n── Errors ───────────────────────────────────────────────")
