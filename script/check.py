@@ -135,10 +135,10 @@ if diagnostic["model_prediction_samples"]:
             f"conf={entry['confidence']:.3f}"
         )
 
-if diagnostic["warnings"]:
-    print("\n── Warnings ─────────────────────────────────────────────")
-    for w in diagnostic["warnings"]:
-        print(f"  ⚠  {w}")
+#if diagnostic["warnings"]:
+ #   print("\n── Warnings ─────────────────────────────────────────────")
+  #  for w in diagnostic["warnings"]:
+   #     print(f"  ⚠  {w}")
 
 if diagnostic["errors"]:
     print("\n── Errors ───────────────────────────────────────────────")
